@@ -14,38 +14,38 @@
 
 
 
-void handle_arpreqs(struct sr_arpreq* req, struct sr_instance* sr){
-    time_t currtime = time(NULL);
+// void handle_arpreqs(struct sr_arpreq* req, struct sr_instance* sr){
+//     time_t currtime = time(NULL);
 
-    if (difftime(currtime, req->sent) > 1.0){
-        if (req_times_sent >= 5){
-            //send icmp host unreachable to source addr of all pkts waiting on req
-            //will use method defined in sr_router.c
-            sr_arpreq_destroy(&sr, req);
-        }
-        else{
-            //send arp request
+//     if (difftime(currtime, req->sent) > 1.0){
+//         if (req_times_sent >= 5){
+//             //send icmp host unreachable to source addr of all pkts waiting on req
+//             //will use method defined in sr_router.c
+//             sr_arpreq_destroy(&sr, req);
+//         }
+//         else{
+//             //send arp request
 
-            struct sr_if* sr_interface = sr_get_interface(sr, req->packets->iface);
-            sr_arp_hdr_t* arp_header = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
-            //fill out the arp header
-            arp_header->ar_hrd = htons(arp_hdr_ethernet);             /* format of hardware address   */
-            arp_header->ar_pro = htons(ethertype_ip);             /* format of protocol address   */
-            arp_header->ar_hln = ETHER_ADDR_LEN;             /* length of hardware address   */
-            arp_header->ar_pln = sizeof(uint32_t);             /* length of protocol address   */
-            arp_header->ar_op = htons(arp_op_request);              /* ARP opcode (command)         */
-            arp_header->ar_sha = sr_interface->addr;   /* sender hardware address      */
-            arp_header->ar_sip = sr_interface->ip;             /* sender IP address            */
-            //arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
-            arp_header->ar_tip = req->ip;
+//             struct sr_if* sr_interface = sr_get_interface(sr, req->packets->iface);
+//             sr_arp_hdr_t* arp_header = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
+//             //fill out the arp header
+//             arp_header->ar_hrd = htons(arp_hdr_ethernet);             /* format of hardware address   */
+//             arp_header->ar_pro = htons(ethertype_ip);              format of protocol address   
+//             arp_header->ar_hln = ETHER_ADDR_LEN;             /* length of hardware address   */
+//             arp_header->ar_pln = sizeof(uint32_t);             /* length of protocol address   */
+//             arp_header->ar_op = htons(arp_op_request);              /* ARP opcode (command)         */
+//             arp_header->ar_sha = sr_interface->addr;   /* sender hardware address      */
+//             arp_header->ar_sip = sr_interface->ip;             /* sender IP address            */
+//             //arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
+//             arp_header->ar_tip = req->ip;
 
-            //send the packet, will use method defined in sr_router when it is built
-            req->sent = currtime;
-            req->times_sent++;
-        }
-    }
+//             //send the packet, will use method defined in sr_router when it is built
+//             req->sent = currtime;
+//             req->times_sent++;
+//         }
+//     }
 
-}
+// }
 
 /* This function gets called every second. For each request sent out, we keep
   checking whether we should resend an request or destroy the arp request.
