@@ -92,6 +92,7 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq *req){
 /*construct an ICMP echo message and send it*/
 void send_icmp_echo(struct sr_instance* sr, sr_ip_hdr_t* packet){
 
+    /*initialise the icmp packet header*/
     sr_icmp_hdr_t* icmp_header = (sr_icmp_hdr_t*) ((uint8_t*)packet + 4*packet->ip_hl);
 
     /*switch the destination and source addresses around*/
@@ -100,17 +101,14 @@ void send_icmp_echo(struct sr_instance* sr, sr_ip_hdr_t* packet){
     packet->ip_src = dest;
     packet->ip_dst = src;
 
-    /*icmp message type 0, code 0
-    icmp_header->icmp_type = 0;
-    icmp_header->icmp_code = 0;*/
-
+    /*icmp message type 0, code 0*/
     icmp_header->icmp_type = 0;
     icmp_header->icmp_type = 0;
 
-
+    /*get the checksum calculated and put into the header*/
     packet->ip_sum = 0;
     packet->ip_sum = cksum(packet, 32);
-
+    /*send the packet*/
     direct_and_send_packet(sr, packet, src);
 
 }
