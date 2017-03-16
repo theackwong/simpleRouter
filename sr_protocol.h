@@ -78,6 +78,19 @@
 #define ICMP_DATA_SIZE 28
 
 /* TODO: Add more constants, structs, enums */
+#define ICMP_ECHO_REQUEST_TYPE 8
+#define ICMP_ECHO_REQUEST_CODE 0
+
+#define ICMP_ECHO_REPLY_TYPE 0
+#define ICMP_ECHO_REPLY_CODE 0
+
+#define ICMP_DESTINATION_UNREACHABLE_TYPE 3
+#define ICMP_HOST_UNREACHABLE_CODE 1
+#define ICMP_PORT_UNREACHABLE_CODE 3
+
+#define ICMP_TIME_EXCEEDED_TYPE 11
+#define ICMP_TIME_EXCEEDED_CODE 0
+
 
 /* Structure of a ICMP header
  */
