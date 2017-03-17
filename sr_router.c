@@ -107,17 +107,70 @@ void send_icmp_echo(struct sr_instance* sr, sr_ip_hdr_t* packet){
 
     /*get the checksum calculated and put into the header*/
     packet->ip_sum = 0;
-    packet->ip_sum = cksum(packet, 32);
+    packet->ip_sum = cksum(packet, 4*packet->ip_hl);
+
+    icmp_header->icmp_sum = 0;
+    icmp_header->icmp_sum = cksum(icmp_header, (ntohs(packet->ip_len) - 4*packet->ip_hl));
     /*send the packet*/
     direct_and_send_packet(sr, packet, src);
 
 }
 
 void send_icmp_message(struct sr_instance* sr, sr_ip_hdr_t* packet, int type, int code){
+    
+    /*initilize IP and ICMP headers and packet*/
+    sr_ip_hdr_t* ip_header = (struct sr_ip_hdr*)malloc(sizeof(struct sr_ip_hdr));
+    sr_icmp_hdr_t* icmp_header;
+
+    unsigned int ip_len = 4*ip_header->ip_hl + sizeof(struct sr_icmp_t3_hdr);
+    uint8_t* combined_packet = malloc(ip_len);
+
+
+    /*Check routing tables for valid route, if none exists then abort the icmp message */
+    struct sr_rt* valid_rt  = longest_prefix_matching(sr, ip_header->ip_dst);
+    if (valid_rt == NULL){
+        return;
+    }
+
+    /* grab the valid interface */
+    struct sr_if* interface = sr_get_interface(sr, (const char*)valid_rt->interface);
+
+    /* construct ip header */
+    ip_header->ip_hl = 4;       /* header length */
+    ip_header->ip_v = 4;        /* version */
+
+    ip_header->ip_tos = 0;         /* type of service */
+    ip_header->ip_len = htons(ip_len);            /* total length */
+    ip_header->ip_id = packet->ip_id;         /* identification */
+    ip_header->ip_off = htons(IP_DF);            /* fragment offset field */
+    ip_header->ip_ttl = 50;         /* time to live */
+    ip_header->ip_p = ip_protocol_icmp;           /* protocol */
+    ip_header->ip_src = interface->ip; 
+    ip_header->ip_dst = packet->ip_src;    /* source and dest address */
+
+    ip_header->ip_sum = 0;            /* checksum */
+    ip_header->ip_sum = cksum(ip_header, 4*ip_header->ip_hl);
+
+    /* construct ICMP header */
+
+    icmp_header->icmp_type = type;
+    icmp_header->icmp_code = code;
+
+    icmp_header->icmp_sum = 0;
+    icmp_header->icmp_sum = cksum(&icmp_header, sizeof(struct sr_icmp_hdr));
+
+    /*put both headers in a packet to send out */
+    memcpy(combined_packet, ip_header, 4*ip_header->ip_hl);
+    memcpy(combined_packet + 4*ip_header->ip_hl, &icmp_header, ip_len - 4*ip_header->ip_hl);
+
+    /* pass the packet to the sending function */
+    direct_and_send_packet(sr, combined_packet, packet->ip_src);
+
 
 }
 
-void send_arp_reply(){
+void send_arp_reply(struct sr_instance* sr, sr_arp_hdr_t* arp_header, uint8_t* packet){
+
 
 }
 
@@ -281,6 +334,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
     {
         printf("-> Packet dropped: invalid TTL\n");
         /* TODO: send icmp error: (sr, packet, len, received_if, ICMP_TIME_EXCEEDED_TYPE, ICMP_TIME_EXCEEDED_CODE);*/
+        send_icmp_message(sr, packet, ICMP_TIME_EXCEEDED_TYPE, ICMP_TIME_EXCEEDED_CODE);
 
         return;
     }
@@ -307,107 +361,107 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
     {
             /***** Getting the ICMP header *****/
 	    received_icmp_hdr = ((struct sr_icmp_hdr*)(packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr)));
-            output_icmp_hdr = ((struct sr_icmp_hdr*)(malloc(sizeof(struct sr_icmp_hdr))));
+        output_icmp_hdr = ((struct sr_icmp_hdr*)(malloc(sizeof(struct sr_icmp_hdr))));
 
-            if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REQUEST_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REQUEST_CODE))
+        if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REQUEST_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REQUEST_CODE))
+        {
+            printf("Requesting The IP Packet is ICMP ECHO \n");
+
+            printf("Constructing ICMP ECHO REPLY Packet\n");
+            int i;
+
+            /* Destination address */
+            for (i = 0; i < ETHER_ADDR_LEN; i++)
             {
-                printf("Requesting The IP Packet is ICMP ECHO \n");
-
-                printf("Constructing ICMP ECHO REPLY Packet\n");
-                int i;
-
-                /* Destination address */
-                for (i = 0; i < ETHER_ADDR_LEN; i++)
-                {
-                    output_ethernet_hdr->ether_dhost[i] = 255;
-                }
-		
-                /* Source address */   
-                for (i = 0; i < ETHER_ADDR_LEN; i++)
-                {
-                    output_ethernet_hdr->ether_shost[i] = ((uint8_t)(received_if->addr[i]));
-                }         
-                
-                /* Type */
-                output_ethernet_hdr->ether_type = received_e_hdr->ether_type;
-
-
-                /* Version + Header length */
-                output_ip_hdr->ip_v = received_ip_hdr->ip_v;
-                output_ip_hdr->ip_hl = received_ip_hdr->ip_hl;
-
-                /* DS */
-                output_ip_hdr->ip_tos = received_ip_hdr->ip_tos;
-
-                /* Total length */
-                output_ip_hdr->ip_len = received_ip_hdr->ip_len;
-
-                /* Identification */
-                output_ip_hdr->ip_id = received_ip_hdr->ip_id;
-
-                /* Fragment */
-                output_ip_hdr->ip_off = received_ip_hdr->ip_off;
-
-                /* TTL */
-                output_ip_hdr->ip_ttl = 64;
-
-                /* Protocol */
-                output_ip_hdr->ip_p = received_ip_hdr->ip_p;
-
-                /* Checksum */
-                output_ip_hdr->ip_sum = 0;
-
-                /* Source IP address */
-                output_ip_hdr->ip_src = received_ip_hdr->ip_dst;
-
-                /* Destination IP address */
-                output_ip_hdr->ip_dst = received_ip_hdr->ip_src;
-
-                /* Re-Calculate checksum of the IP header */
-                output_ip_hdr->ip_sum = cksum(output_ip_hdr, sizeof(struct sr_ip_hdr));
-
-                /* Type */
-                output_icmp_hdr->icmp_type = ICMP_ECHO_REPLY_TYPE;
-
-                /* Code */
-                output_icmp_hdr->icmp_code = ICMP_ECHO_REPLY_CODE;
-
-                /* Checksum */
-                output_icmp_hdr->icmp_sum = 0;
-
-                /***** Creating the transmitted packet *****/
-                output_packet = ((uint8_t*)(malloc(sizeof(uint8_t) * len)));
-
-                memcpy(output_packet, output_ethernet_hdr, sizeof(struct sr_ethernet_hdr));
-                memcpy(output_packet + sizeof(struct sr_ethernet_hdr), output_ip_hdr, sizeof(struct sr_ip_hdr));
-                memcpy(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), output_icmp_hdr, sizeof(struct sr_icmp_hdr));
-                /* Copy the Data part */
-		unsigned int i2;
-                for (i2 = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr) + sizeof(struct sr_icmp_hdr); i2 < len; i2++)
-                {
-                    output_packet[i2] = packet[i2];
-                }
-
-
-                /* Re-Calculate checksum of the ICMP header */
-                /* Updating the new checksum in output_packet */
-                ((struct sr_icmp_hdr*)(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr)))->icmp_sum =
-                    cksum(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), len - (sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr)));
-
-
-                /* TODO: send the out_packet out */
-
-
-                    free(output_packet);
-                }
-
-                
-                free(output_icmp_hdr);
-                free(output_ip_hdr);
-                free(output_ethernet_hdr);
+                output_ethernet_hdr->ether_dhost[i] = 255;
             }
-            else if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REPLY_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REPLY_CODE))
+	
+            /* Source address */   
+            for (i = 0; i < ETHER_ADDR_LEN; i++)
             {
-                printf("-> Get the reply successfully\n");
+                output_ethernet_hdr->ether_shost[i] = ((uint8_t)(received_if->addr[i]));
+            }         
+            
+            /* Type */
+            output_ethernet_hdr->ether_type = received_e_hdr->ether_type;
+
+
+            /* Version + Header length */
+            output_ip_hdr->ip_v = received_ip_hdr->ip_v;
+            output_ip_hdr->ip_hl = received_ip_hdr->ip_hl;
+
+            /* DS */
+            output_ip_hdr->ip_tos = received_ip_hdr->ip_tos;
+
+            /* Total length */
+            output_ip_hdr->ip_len = received_ip_hdr->ip_len;
+
+            /* Identification */
+            output_ip_hdr->ip_id = received_ip_hdr->ip_id;
+
+            /* Fragment */
+            output_ip_hdr->ip_off = received_ip_hdr->ip_off;
+
+            /* TTL */
+            output_ip_hdr->ip_ttl = 64;
+
+            /* Protocol */
+            output_ip_hdr->ip_p = received_ip_hdr->ip_p;
+
+            /* Checksum */
+            output_ip_hdr->ip_sum = 0;
+
+            /* Source IP address */
+            output_ip_hdr->ip_src = received_ip_hdr->ip_dst;
+
+            /* Destination IP address */
+            output_ip_hdr->ip_dst = received_ip_hdr->ip_src;
+
+            /* Re-Calculate checksum of the IP header */
+            output_ip_hdr->ip_sum = cksum(output_ip_hdr, sizeof(struct sr_ip_hdr));
+
+            /* Type */
+            output_icmp_hdr->icmp_type = ICMP_ECHO_REPLY_TYPE;
+
+            /* Code */
+            output_icmp_hdr->icmp_code = ICMP_ECHO_REPLY_CODE;
+
+            /* Checksum */
+            output_icmp_hdr->icmp_sum = 0;
+
+            /***** Creating the transmitted packet *****/
+            output_packet = ((uint8_t*)(malloc(sizeof(uint8_t) * len)));
+
+            memcpy(output_packet, output_ethernet_hdr, sizeof(struct sr_ethernet_hdr));
+            memcpy(output_packet + sizeof(struct sr_ethernet_hdr), output_ip_hdr, sizeof(struct sr_ip_hdr));
+            memcpy(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), output_icmp_hdr, sizeof(struct sr_icmp_hdr));
+            /* Copy the Data part */
+	        unsigned int i2;
+            for (i2 = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr) + sizeof(struct sr_icmp_hdr); i2 < len; i2++)
+            {
+                output_packet[i2] = packet[i2];
             }
+
+
+            /* Re-Calculate checksum of the ICMP header */
+            /* Updating the new checksum in output_packet */
+            ((struct sr_icmp_hdr*)(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr)))->icmp_sum =
+                cksum(output_packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), len - (sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr)));
+
+
+            /* TODO: send the out_packet out */
+            direct_and_send_packet(sr, packet, output_ip_hdr->ip_dst);
+
+            free(output_packet);
+            
+
+            
+            free(output_icmp_hdr);
+            free(output_ip_hdr);
+            free(output_ethernet_hdr);
+        }else if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REPLY_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REPLY_CODE))
+        {
+            printf("-> Get the reply successfully\n");
+        }
+    } 
 }/* end handle_ip_packet */
