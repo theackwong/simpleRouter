@@ -297,6 +297,72 @@ void sr_handlepacket(struct sr_instance* sr,
     }
 }/* -- sr_handlepacket -- */
 
+void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_ethernet_hdr){
+    printf("\nRecieved ARP Packet, length = %d\n", len);
+
+    sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(packet + sizeof(struct sr_ethernet_hdr));
+
+    if (ntohs(arp_header->ar_op) == arp_op_request) {
+        /* send arp reply*/
+        sr_arp_hdr_t* arp_reply_hdr = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
+        struct sr_if* arp_interface = sr_get_interface(sr, received_if);
+
+        /*fill out the arp header*/
+        arp_reply_hdr->ar_hrd = htons(arp_hrd_ethernet);             /* format of hardware address   */
+        arp_reply_hdr->ar_pro = htons(ethertype_ip);             /* format of protocol address   */
+        arp_reply_hdr->ar_hln = ETHER_ADDR_LEN;             /* length of hardware address   */
+        arp_reply_hdr->ar_pln = sizeof(uint32_t);             /* length of protocol address   */
+        arp_reply_hdr->ar_op = htons(arp_op_reply);              /* ARP opcode (command)         */
+        memcpy(arp_reply_hdr->ar_sha, arp_interface->addr, ETHER_ADDR_LEN);   /* sender hardware address      */
+        arp_reply_hdr->ar_sip = arp_interface->ip;             /* sender IP address            */
+        /*arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
+        arp_reply_hdr->ar_tip = arp_header->ar_sip;
+
+        sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)packet;
+
+        memcpy(ethernet_header->ether_dhost, received_ethernet_hdr->ether_shost, ETHER_ADDR_LEN);
+        memcpy(ethernet_header->ether_shost, arp_interface->addr, ETHER_ADDR_LEN);
+
+        /*copy ethernet header into packet*/
+        memcpy(packet, &ethernet_header, sizeof(struct sr_ethernet_hdr));
+        /*copy the ICMP packet into the mem address after the header*/
+        memcpy((packet + sizeof(struct sr_ethernet_hdr)), arp_reply_hdr, sizeof(struct sr_arp_hdr));
+
+        sr_send_packet(sr, packet, sizeof(packet) + sizeof(struct sr_ethernet_hdr), received_if);
+
+        free(arp_reply_hdr);
+
+    }else{ /* if it is an ARP reply */
+
+        /*grab the source IP */
+        uint32_t source_ip = arp_header->ar_sip;
+        struct sr_arpentry* existing_arp = sr_arpcache_lookup(&sr->cache, source_ip);
+
+        if (existing_arp == NULL){ /*if there is no identical arp reply in the cache, add it to the cache */
+
+            struct sr_arpreq* arp_req = sr_arpcache_insert(&sr->cache, arp_header->ar_sha, source_ip);
+
+            if (arp_req != NULL){ /* if there is an existing arp request with a matching IP, then fulfill these requests */
+                
+                sr_ip_hdr_t* ip_hdr;
+                /* grab all the packets that made the arp request */
+                struct sr_packet* arp_req_packets = arp_req->packets;
+
+                while(arp_req_packets != NULL){ /* go through the arp requests and send them out*/
+                    ip_hdr = (sr_ip_hdr_t*) arp_req_packets->buf;
+                    direct_and_send_packet(sr, arp_req_packets->buf, ip_hdr->ip_dst);
+                    arp_req_packets = arp_req_packets->next;
+                }
+                /*remove the arp_req since it has been fulfilled*/
+
+                sr_arpreq_destroy(&sr->cache, arp_req);
+
+            }
+
+        }
+
+    }
+}
 
 void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_e_hdr)
 {
@@ -349,10 +415,15 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
          reached = 0;
        }
     }
-    if (reached != 0)
+    if (reached != 0) /* Forward the packet */
     {
         printf(" sending packet, length = %d\n", len);
         /* TODO: send to default next*/
+
+        uint8_t* forwarding_packet = malloc(len);
+        memcpy(forwarding_packet, packet, len);
+
+        direct_and_send_packet(sr, forwarding_packet, received_ip_hdr->ip_dst);
 
         return;
     }
@@ -465,3 +536,5 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
         }
     } 
 }/* end handle_ip_packet */
+
+
