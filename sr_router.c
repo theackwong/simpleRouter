@@ -192,7 +192,27 @@ void direct_and_send_packet(struct sr_instance* sr, uint8_t* packet, uint32_t de
         struct sr_ethernet_hdr ethernet_header;
         uint8_t* ethernet_packet = malloc(sizeof(struct sr_ethernet_hdr) + sizeof(packet));
 
+        /* fill in destination and source MAC addresses in ethernet header */
         memcpy(ethernet_header.ether_dhost, existing_arp->mac, ETHER_ADDR_LEN);
+        memcpy(ethernet_header.ether_shost, interface->addr, ETHER_ADDR_LEN);
+
+        /*copy ethernet header into packet*/
+        memcpy(ethernet_packet, &ethernet_header, sizeof(struct sr_ethernet_hdr));
+        /*copy the ICMP packet into the mem address after the header*/
+        memcpy((ethernet_packet + sizeof(struct sr_ethernet_hdr)), packet, sizeof(packet));
+
+        sr_send_packet(sr, ethernet_packet, sizeof(packet) + sizeof(struct sr_ethernet_hdr), valid_rt->interface);
+
+        free(ethernet_packet);
+
+    }else if(((struct sr_arp_hdr*)packet) == htons(arp_op_request)){ /*if packet being sent is a ARP request packet, USED FOR HANDLE_ARPREQ */
+
+        /*Initilise ethernet header and packet */
+        struct sr_ethernet_hdr ethernet_header;
+        uint8_t* ethernet_packet = malloc(sizeof(struct sr_ethernet_hdr) + sizeof(packet));
+
+        /* fill iln destination and source MAC addresses in ethernet header */
+        memcpy(ethernet_header.ether_dhost, 255, ETHER_ADDR_LEN); /*empty target address since this is an ARP request*/
         memcpy(ethernet_header.ether_shost, interface->addr, ETHER_ADDR_LEN);
 
         /*copy ethernet header into packet*/
