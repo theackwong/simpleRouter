@@ -92,6 +92,14 @@
 #define ICMP_TIME_EXCEEDED_CODE 0
 
 
+#ifndef ETHERTYPE_IP
+#define ETHERTYPE_IP            0x0800  /* IP protocol */
+#endif
+
+#ifndef ETHERTYPE_ARP
+#define ETHERTYPE_ARP           0x0806  /* Addr. resolution protocol */
+#endif
+
 /* Structure of a ICMP header
  */
 struct sr_icmp_hdr {

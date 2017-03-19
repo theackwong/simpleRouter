@@ -169,10 +169,6 @@ void send_icmp_message(struct sr_instance* sr, sr_ip_hdr_t* packet, int type, in
 
 }
 
-void send_arp_reply(struct sr_instance* sr, sr_arp_hdr_t* arp_header, uint8_t* packet){
-
-
-}
 
 /*directs to the packet to appropriate ARP queue or sends it*/
 void direct_and_send_packet(struct sr_instance* sr, uint8_t* packet, uint32_t destination){
@@ -283,13 +279,13 @@ void sr_handlepacket(struct sr_instance* sr,
 
     switch (htons(received_ethernet_hdr->ether_type))
     {
-        /*case ETHERTYPE_ARP:
+        case ETHERTYPE_ARP:
             handle_arp_packet(sr, packet, len, received_if, received_ethernet_hdr);
-            break;*/
+            break;
 
-        /*case ETHERTYPE_IP:
+        case ETHERTYPE_IP:
             handle_ip_packet(sr, packet, len, received_if, received_ethernet_hdr);
-            break;*/
+            break;
 
         default:
             printf("\nReceived Unknow Packet, length = %d\n", len);
@@ -304,6 +300,8 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
 
     if (ntohs(arp_header->ar_op) == arp_op_request) {
         /* send arp reply*/
+        printf("sending arp reply\n");
+        print_hdr_arp(packet);
         sr_arp_hdr_t* arp_reply_hdr = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
         struct sr_if* arp_interface = sr_get_interface(sr, received_if);
 
@@ -315,7 +313,7 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
         arp_reply_hdr->ar_op = htons(arp_op_reply);              /* ARP opcode (command)         */
         memcpy(arp_reply_hdr->ar_sha, arp_interface->addr, ETHER_ADDR_LEN);   /* sender hardware address      */
         arp_reply_hdr->ar_sip = arp_interface->ip;             /* sender IP address            */
-        /*arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
+        memcpy(arp_reply_hdr->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);   /* target hardware address *IGNORE FOR ARP      */
         arp_reply_hdr->ar_tip = arp_header->ar_sip;
 
         sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)packet;
@@ -324,11 +322,13 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
         memcpy(ethernet_header->ether_shost, arp_interface->addr, ETHER_ADDR_LEN);
 
         /*copy ethernet header into packet*/
-        memcpy(packet, &ethernet_header, sizeof(struct sr_ethernet_hdr));
+        memcpy(packet, ethernet_header, sizeof(struct sr_ethernet_hdr));
         /*copy the ICMP packet into the mem address after the header*/
         memcpy((packet + sizeof(struct sr_ethernet_hdr)), arp_reply_hdr, sizeof(struct sr_arp_hdr));
 
-        sr_send_packet(sr, packet, sizeof(packet) + sizeof(struct sr_ethernet_hdr), received_if);
+        print_hdr_arp(packet);
+
+        sr_send_packet(sr, packet, len, received_if);
 
         free(arp_reply_hdr);
 
