@@ -55,8 +55,13 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq *req){
 
     if (difftime(currtime, req->sent) > 1.0){
         if (req->times_sent >= 5){
-            /*send icmp host unreachable to source addr of all pkts waiting on req
-            /will use method defined in sr_router.c*/
+            /*send icmp host unreachable to source addr of all pkts waiting on req */
+            struct sr_packet* packet = req->packets;
+            while(packet != NULL){
+                send_icmp_message(sr, (sr_ip_hdr_t*)packet->buf,3,1);
+                packet = packet->next;
+            }
+
             sr_arpreq_destroy(&sr, req);
         }
         else{
@@ -79,11 +84,13 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq *req){
             /*arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
             arp_header->ar_tip = req->ip;
 
-            /*send the packet*/
-            direct_and_send_packet(sr, arp_header, req->ip);
 
             req->sent = currtime;
             req->times_sent++;
+
+            /*send the packet*/
+            direct_and_send_packet(sr, (uint8_t*)arp_header, req->ip);
+
         }
     }
 
