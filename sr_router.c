@@ -57,20 +57,25 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq *req){
         if (req->times_sent >= 5){
             /*send icmp host unreachable to source addr of all pkts waiting on req
             /will use method defined in sr_router.c*/
+            struct sr_packet* packet = req->packets;
+            while(packet != NULL){
+                send_icmp_message(sr, (sr_ip_hdr_t*)packet->buf,3,1);
+                packet = packet->next;
+            }
             sr_arpreq_destroy(&sr, req);
         }
         else{
             /*send arp request*/
-
+            printf("Longest matching, times sent = %d\n", req->times_sent);
             struct sr_rt* rt_entry = longest_prefix_matching(sr, req->ip);
             struct sr_if* sr_interface = sr_get_interface(sr, req->packets->iface);
-
+            printf("lookup\n");
             struct sr_arpentry* existing_arp = sr_arpcache_lookup(&sr->cache, rt_entry->gw.s_addr);
 
             sr_arp_hdr_t* arp_header = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
             /*fill out the arp header*/
             arp_header->ar_hrd = htons(arp_hrd_ethernet);             /* format of hardware address   */
-            arp_header->ar_pro = htons(ethertype_ip);             /* format of protocol address   */
+            arp_header->ar_pro = htons(ETHERTYPE_IP);             /* format of protocol address   */
             arp_header->ar_hln = ETHER_ADDR_LEN;             /* length of hardware address   */
             arp_header->ar_pln = sizeof(uint32_t);             /* length of protocol address   */
             arp_header->ar_op = htons(arp_op_request);              /* ARP opcode (command)         */
@@ -78,12 +83,14 @@ void handle_arpreq(struct sr_instance* sr, struct sr_arpreq *req){
             arp_header->ar_sip = sr_interface->ip;             /* sender IP address            */
             /*arp_header->ar_tha[ETHER_ADDR_LEN];   /* target hardware address *IGNORE FOR ARP      */
             arp_header->ar_tip = req->ip;
-
+            printf("Sending from handle\n");
             /*send the packet*/
-            direct_and_send_packet(sr, arp_header, req->ip);
-
-            req->sent = currtime;
+            print_hdr_arp(arp_header);
+            req->sent = time(NULL); /*reset time in packet*/
             req->times_sent++;
+            direct_and_send_packet(sr, ETHERTYPE_ARP, (uint8_t*)arp_header, req->ip);
+            printf("done\n");
+
         }
     }
 
@@ -112,7 +119,7 @@ void send_icmp_echo(struct sr_instance* sr, sr_ip_hdr_t* packet){
     icmp_header->icmp_sum = 0;
     icmp_header->icmp_sum = cksum(icmp_header, (ntohs(packet->ip_len) - 4*packet->ip_hl));
     /*send the packet*/
-    direct_and_send_packet(sr, packet, src);
+    direct_and_send_packet(sr, ethertype_ip, packet, src);
 
 }
 
@@ -164,15 +171,15 @@ void send_icmp_message(struct sr_instance* sr, sr_ip_hdr_t* packet, int type, in
     memcpy(combined_packet + 4*ip_header->ip_hl, &icmp_header, ip_len - 4*ip_header->ip_hl);
 
     /* pass the packet to the sending function */
-    direct_and_send_packet(sr, combined_packet, packet->ip_src);
+    direct_and_send_packet(sr, ethertype_ip, combined_packet, packet->ip_src);
 
 
 }
 
 
 /*directs to the packet to appropriate ARP queue or sends it*/
-void direct_and_send_packet(struct sr_instance* sr, uint8_t* packet, uint32_t destination){
-
+void direct_and_send_packet(struct sr_instance* sr, enum sr_ethertype type, uint8_t* packet, uint32_t destination){
+    printf("\n SENDING\n");
     /*first, check the routing table to see if a valid route is available*/
     struct sr_rt* valid_rt = longest_prefix_matching(sr, destination);
     
@@ -187,26 +194,29 @@ void direct_and_send_packet(struct sr_instance* sr, uint8_t* packet, uint32_t de
     struct sr_if* interface = sr_get_interface(sr, valid_rt->interface);
 
     if(existing_arp){ /*if there is an existing ARP reply with matching IP->MAC address, use that MAC address to send the packet*/
-
+        printf("\nExisting arp found in cache\n");
         /*initialise ethernet header and ethernet packet*/
         struct sr_ethernet_hdr ethernet_header;
         uint8_t* ethernet_packet = malloc(sizeof(struct sr_ethernet_hdr) + sizeof(packet));
 
         /* fill in destination and source MAC addresses in ethernet header */
+        printf("updating MAC addresses\n");
         memcpy(ethernet_header.ether_dhost, existing_arp->mac, ETHER_ADDR_LEN);
         memcpy(ethernet_header.ether_shost, interface->addr, ETHER_ADDR_LEN);
 
         /*copy ethernet header into packet*/
+        printf("copying new ethernet header\n");
         memcpy(ethernet_packet, &ethernet_header, sizeof(struct sr_ethernet_hdr));
-        /*copy the ICMP packet into the mem address after the header*/
+        /*copy the packet into the mem address after the header*/
+        printf("copying packet into mem address header\n");
         memcpy((ethernet_packet + sizeof(struct sr_ethernet_hdr)), packet, sizeof(packet));
 
         sr_send_packet(sr, ethernet_packet, sizeof(packet) + sizeof(struct sr_ethernet_hdr), valid_rt->interface);
 
         free(ethernet_packet);
 
-    }else if(((struct sr_arp_hdr*)packet) == htons(arp_op_request)){ /*if packet being sent is a ARP request packet, USED FOR HANDLE_ARPREQ */
-
+    }else if(type == ETHERTYPE_ARP  && ((struct sr_arp_hdr*)packet) == htons(arp_op_request)){ /*if packet being sent is a ARP request packet, USED FOR HANDLE_ARPREQ */
+        printf("SENDING FROM HANDLE_ARPREQ\n");
         /*Initilise ethernet header and packet */
         struct sr_ethernet_hdr ethernet_header;
         uint8_t* ethernet_packet = malloc(sizeof(struct sr_ethernet_hdr) + sizeof(packet));
@@ -225,12 +235,19 @@ void direct_and_send_packet(struct sr_instance* sr, uint8_t* packet, uint32_t de
         free(ethernet_packet);
 
     }else{ /*if there is no existing ARP in the cache with matching IP->MAC address, set up an ARP request then put it in the queue*/
-
+        printf("SENDING BUT PUT INTO ARP REQ QUEUE\n");
         /*make a copy of the packet*/
-        uint8_t* copy = packet;
+        print_hdr_arp(packet);
+        uint8_t* copy = malloc(sizeof(packet));
+        printf("memcopy\n");
+        memcpy(copy, packet, sizeof(packet));
         /*throw it in the arp queue*/
+        printf("queuing\n");
         struct sr_arpreq* arp_request = sr_arpcache_queuereq(&sr->cache, valid_rt->gw.s_addr, copy, sizeof(packet), valid_rt->interface);
+        printf("handling\n");
         handle_arpreq(sr, arp_request);
+        printf("free");
+        free(copy);
 
     }
 
@@ -370,7 +387,7 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
 
                 while(arp_req_packets != NULL){ /* go through the arp requests and send them out*/
                     ip_hdr = (sr_ip_hdr_t*) arp_req_packets->buf;
-                    direct_and_send_packet(sr, arp_req_packets->buf, ip_hdr->ip_dst);
+                    direct_and_send_packet(sr, ETHERTYPE_IP, arp_req_packets->buf, ip_hdr->ip_dst);
                     arp_req_packets = arp_req_packets->next;
                 }
                 /*remove the arp_req since it has been fulfilled*/
@@ -385,6 +402,60 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
 }
 
 void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_e_hdr)
+{
+    printf("\nRecieved IP Packet, length = %d\n", len);
+
+    sr_ip_hdr_t* ip_packet = (struct sr_ip_hdr*)(packet + sizeof(struct sr_ethernet_hdr));
+
+    uint16_t checksum = ip_packet->ip_sum;
+
+    ip_packet->ip_sum = 0;
+    uint16_t expected_checksum = cksum(ip_packet, 4*ip_packet->ip_hl);
+
+    printf("\nChecking checksum\n");
+    if (checksum != expected_checksum){
+        return;
+    }
+
+    int arrived = 0;
+
+    struct sr_if* current = sr->if_list;
+
+    while (current != NULL)
+    {
+        if (current->ip == ip_packet->ip_dst){
+            arrived = 1;
+        }
+        current = current->next;
+    }
+
+    if (arrived == 1){
+        printf("\nArrived\n");
+        if (ip_protocol(packet + sizeof(struct sr_ethernet_hdr)) == (uint8_t)ip_protocol_icmp){
+            send_icmp_echo(sr, ip_packet);
+        }else{
+
+            send_icmp_message(sr, ip_packet, 3, 3);
+        }
+    } else {
+        printf("\nForwarding\n");
+        ip_packet->ip_ttl--;
+
+        if(ip_packet->ip_ttl == 0){
+            printf("\nTTL expired\n");
+            send_icmp_message(sr, ip_packet, 11, 0);
+            return;
+        }
+
+        ip_packet->ip_sum = 0;
+        ip_packet->ip_sum = cksum(ip_packet, 4*ip_packet->ip_hl);
+
+        direct_and_send_packet(sr, ETHERTYPE_IP, ip_packet, ip_packet->ip_dst);
+        printf("Passed to sending method\n");
+    }
+}
+
+void handle_ip_packet2(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_e_hdr)
 {
     printf("\nReceived IP Packet, length = %d\n", len);
 
@@ -443,7 +514,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
         uint8_t* forwarding_packet = malloc(len);
         memcpy(forwarding_packet, packet, len);
 
-        direct_and_send_packet(sr, forwarding_packet, received_ip_hdr->ip_dst);
+        direct_and_send_packet(sr, ETHERTYPE_IP, forwarding_packet, received_ip_hdr->ip_dst);
 
         return;
     }
@@ -541,7 +612,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
 
 
             /* TODO: send the out_packet out */
-            direct_and_send_packet(sr, packet, output_ip_hdr->ip_dst);
+            direct_and_send_packet(sr, ETHERTYPE_IP, packet, output_ip_hdr->ip_dst);
 
             free(output_packet);
             
