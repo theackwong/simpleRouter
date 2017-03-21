@@ -5,7 +5,8 @@ ANDREW WONG(username: acw16)
 
 ---------------------------------------------------------------------------------------
 Work Division: who implemented/tested which part
-JUNDA implement the IP Forwarding
+JUNDA implement the IP Forwarding and tested
+	- IP sending
 ANDREW implemented/tested:
 	- ARP sending/receiving
 	- ICMP sending
