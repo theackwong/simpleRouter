@@ -291,7 +291,7 @@ void sr_handlepacket(struct sr_instance* sr,
   assert(packet);
   assert(interface);
 
-  printf("Length of packet GET:  %d\n",len);
+  Debug("Length of packet GET:  %d\n",len);
 
   /* TODO: Add forwarding logic here */
   struct sr_if* received_if = sr_get_interface(sr, interface);
@@ -308,19 +308,19 @@ void sr_handlepacket(struct sr_instance* sr,
             break;
 
         default:
-            printf("\nReceived Unknow Packet, length = %d\n", len);
+            Debug("\nReceived Unknow Packet, length = %d\n", len);
             break;
     }
 }/* -- sr_handlepacket -- */
 
 void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_ethernet_hdr){
-    printf("\nRecieved ARP Packet, length = %d\n", len);
+    Debug("\nRecieved ARP Packet, length = %d\n", len);
 
     sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(packet + sizeof(struct sr_ethernet_hdr));
 
     if (ntohs(arp_header->ar_op) == arp_op_request) {
         /* send arp reply*/
-        printf("sending arp reply\n");
+        Debug("sending arp reply\n");
         print_hdr_arp(packet);
         sr_arp_hdr_t* arp_reply_hdr = (struct sr_arp_hdr*)malloc(sizeof(struct sr_arp_hdr));
         struct sr_if* arp_interface = sr_get_interface(sr, received_if);
@@ -386,7 +386,9 @@ void handle_arp_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len
 
 void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, struct sr_if* received_if, struct sr_ethernet_hdr* received_e_hdr)
 {
-    printf("\nReceived IP Packet, length = %d\n", len);
+    len = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr) + sizeof(struct sr_icmp_hdr);
+
+    Debug("\nReceived IP Packet, length = %d\n", len);
 
 
     struct sr_ethernet_hdr* output_ethernet_hdr;
@@ -406,7 +408,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
     uint16_t received_sum = cksum(received_ip_hdr, sizeof(struct sr_ip_hdr));
     if (received_sum != received_sum_temp)
     {
-        printf("Packet dropped due to invalid checksum\n");
+        Debug("Packet dropped due to invalid checksum\n");
 
         return;
     }
@@ -418,7 +420,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
     /***** Checking the received TTL *****/
     if (received_ip_hdr->ip_ttl < 0)
     {
-        printf("-> Packet dropped: invalid TTL\n");
+        Debug("Packet dropped due to invalid TTL\n");
         /* TODO: send icmp error: (sr, packet, len, received_if, ICMP_TIME_EXCEEDED_TYPE, ICMP_TIME_EXCEEDED_CODE);*/
         send_icmp_message(sr, packet, ICMP_TIME_EXCEEDED_TYPE, ICMP_TIME_EXCEEDED_CODE);
 
@@ -437,7 +439,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
     }
     if (reached != 0) /* Forward the packet */
     {
-        printf(" sending packet, length = %d\n", len);
+        Debug(" Sending packet, length = %d\n", len);
         /* TODO: send to default next*/
 
         uint8_t* forwarding_packet = malloc(len);
@@ -456,9 +458,9 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
 
         if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REQUEST_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REQUEST_CODE))
         {
-            printf("Requesting The IP Packet is ICMP ECHO \n");
+            Debug("Requesting The IP Packet is ICMP ECHO \n");
 
-            printf("Constructing ICMP ECHO REPLY Packet\n");
+            Debug("Constructing ICMP ECHO REPLY Packet\n");
             int i;
 
             /* Destination address */
@@ -552,7 +554,7 @@ void handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len,
             free(output_ethernet_hdr);
         }else if ((received_icmp_hdr->icmp_type == ICMP_ECHO_REPLY_TYPE) & (received_icmp_hdr->icmp_code == ICMP_ECHO_REPLY_CODE))
         {
-            printf("-> Get the reply successfully\n");
+            Debug("Replied\n");
         }
     } 
 }/* end handle_ip_packet */
